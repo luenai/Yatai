@@ -187,8 +187,7 @@ if ! kubectl get secret ${minio_secret_name} -n ${namespace} >/dev/null 2>&1; th
 else
   echo "🤩 secret ${minio_secret_name} already exists"
 fi
-
-S3_ENDPOINT=minio.${namespace}.svc.cluster.local
+S3_ENDPOINT=yatai-minio.${namespace}.svc.cluster.local:9000
 S3_REGION=foo
 S3_BUCKET_NAME=yatai
 S3_SECURE=false
