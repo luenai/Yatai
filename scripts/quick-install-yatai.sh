@@ -251,14 +251,26 @@ fi
 # done
 
 
+#!/bin/bash
+
+# Set your namespace before running this script
+namespace="yatai-system"
+
+echo "📦 Adding MinIO Helm repo..."
 helm repo add minio https://operator.min.io/ || true
 helm repo update minio
 
-echo "🔐 Creating secret for MinIO credentials..."
+echo "🔐 Creating Helm-compatible secret for MinIO credentials..."
 kubectl create secret generic yatai-minio-secret \
   -n ${namespace} \
   --from-literal=accesskey=${S3_ACCESS_KEY} \
-  --from-literal=secretkey=${S3_SECRET_KEY} || true
+  --from-literal=secretkey=${S3_SECRET_KEY} \
+  --dry-run=client -o yaml | \
+  kubectl label --local -f - app.kubernetes.io/managed-by=Helm -o yaml | \
+  kubectl annotate --local -f - \
+    meta.helm.sh/release-name=yatai-minio-tenant \
+    meta.helm.sh/release-namespace=${namespace} -o yaml | \
+  kubectl apply -f -
 
 echo "🤖 Creating MinIO Tenant..."
 helm upgrade --install yatai-minio-tenant minio/tenant \
@@ -268,7 +280,7 @@ helm upgrade --install yatai-minio-tenant minio/tenant \
   --set tenant.configSecret.name=yatai-minio-secret
 
 echo "⏳ Waiting for MinIO tenant to be ready..."
-# Retry logic to avoid kubectl wait errors due to minio tenant resources not being created
+# Retry logic to avoid kubectl wait errors due to minio tenant resources not being created immediately
 for i in $(seq 1 10); do
   if kubectl -n ${namespace} wait --for=condition=ready --timeout=600s pod -l v1.min.io/tenant=yatai-minio; then
     echo "✅ MinIO tenant is ready"
