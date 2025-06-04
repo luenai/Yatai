@@ -221,79 +221,50 @@ else
   echo "🤩 standard storageclass already exists"
 fi
 
-# helm repo add minio https://operator.min.io/ || true
-# helm repo update minio
+# 🆕 ---------- MinIO tenant installation ----------
 
-# echo "🤖 creating MinIO Tenant..."
-# helm upgrade --install yatai-minio-tenant minio/tenant \
-#   -n ${namespace} \
-#   --set secrets.accessKey=${S3_ACCESS_KEY} \
-#   --set secrets.secretKey=${S3_SECRET_KEY} \
-#   --set tenant.name=yatai-minio \
-#   --set tenant.certificate.requestAutoCert=false
-
-
-# echo "⏳ waiting for minio tenant to be ready..."
-# # this retry logic is to avoid kubectl wait errors due to minio tenant resources not being created
-# for i in $(seq 1 10); do
-#   if kubectl -n ${namespace} wait --for=condition=ready --timeout=600s pod -l v1.min.io/tenant=yatai-minio; then
-#     echo "✅ minio tenant is ready"
-#     break
-#   else
-#     if [ $i -eq 10 ]; then
-#       echo "😱 minio tenant is not ready"
-#       exit 1
-#     fi
-#     echo "😱 minio tenant is not ready, retrying..."
-#     sleep 5
-#     continue
-#   fi
-# done
-
-
-#!/bin/bash
-
-# Set your namespace before running this script
-namespace="yatai-system"
-
-echo "📦 Adding MinIO Helm repo..."
 helm repo add minio https://operator.min.io/ || true
 helm repo update minio
 
-echo "🔐 Creating Helm-compatible secret for MinIO credentials..."
-kubectl create secret generic yatai-minio-secret \
-  -n ${namespace} \
-  --from-literal=accesskey=${S3_ACCESS_KEY} \
-  --from-literal=secretkey=${S3_SECRET_KEY} \
-  --dry-run=client -o yaml | \
-  kubectl label --local -f - app.kubernetes.io/managed-by=Helm -o yaml | \
-  kubectl annotate --local -f - \
-    meta.helm.sh/release-name=yatai-minio-tenant \
-    meta.helm.sh/release-namespace=${namespace} -o yaml | \
-  kubectl apply -f -
+release_name="yatai-minio-tenant"
+secret_name="yatai-minio-secret"
 
-echo "🤖 Creating MinIO Tenant..."
-helm upgrade --install yatai-minio-tenant minio/tenant \
-  -n ${namespace} \
+echo "🔐 Creating or patching secret for MinIO credentials…"
+kubectl create secret generic "${secret_name}" \
+  -n "${namespace}" \
+  --from-literal=accesskey="${S3_ACCESS_KEY}" \
+  --from-literal=secretkey="${S3_SECRET_KEY}" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl label    secret "${secret_name}" -n "${namespace}" \
+  app.kubernetes.io/managed-by=Helm --overwrite
+kubectl annotate secret "${secret_name}" -n "${namespace}" \
+  meta.helm.sh/release-name="${release_name}" \
+  meta.helm.sh/release-namespace="${namespace}" --overwrite
+
+echo "🤖 Installing / upgrading MinIO Tenant…"
+helm upgrade --install "${release_name}" minio/tenant \
+  -n "${namespace}" \
   --set tenant.name=yatai-minio \
   --set tenant.certificate.requestAutoCert=false \
-  --set tenant.configSecret.name=yatai-minio-secret
+  --set tenant.configSecret.name="${secret_name}"
 
-echo "⏳ Waiting for MinIO tenant to be ready..."
-# Retry logic to avoid kubectl wait errors due to minio tenant resources not being created immediately
-for i in $(seq 1 10); do
-  if kubectl -n ${namespace} wait --for=condition=ready --timeout=600s pod -l v1.min.io/tenant=yatai-minio; then
+echo "⏳ Waiting for MinIO tenant to be ready…"
+for i in {1..10}; do
+  if kubectl -n "${namespace}" wait --for=condition=ready --timeout=600s pod -l v1.min.io/tenant=yatai-minio; then
     echo "✅ MinIO tenant is ready"
     break
-  else
-    if [ $i -eq 10 ]; then
-      echo "❌ MinIO tenant is not ready after multiple attempts"
-      exit 1
-    fi
-    echo "🔄 MinIO tenant is not ready, retrying..."
-    sleep 5
   fi
+  if [ "$i" -eq 10 ]; then
+    echo "❌ MinIO tenant failed to become ready"
+    exit 1
+  fi
+  echo "🔄 MinIO tenant not ready yet, retrying…"
+  sleep 5
 done
+
+# ---------- End MinIO tenant installation ----------
+
 
 echo "🧪 testing MinIO connection..."
 for i in $(seq 1 10); do
