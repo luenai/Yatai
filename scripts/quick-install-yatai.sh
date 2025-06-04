@@ -221,32 +221,65 @@ else
   echo "🤩 standard storageclass already exists"
 fi
 
+# helm repo add minio https://operator.min.io/ || true
+# helm repo update minio
+
+# echo "🤖 creating MinIO Tenant..."
+# helm upgrade --install yatai-minio-tenant minio/tenant \
+#   -n ${namespace} \
+#   --set secrets.accessKey=${S3_ACCESS_KEY} \
+#   --set secrets.secretKey=${S3_SECRET_KEY} \
+#   --set tenant.name=yatai-minio \
+#   --set tenant.certificate.requestAutoCert=false
+
+
+# echo "⏳ waiting for minio tenant to be ready..."
+# # this retry logic is to avoid kubectl wait errors due to minio tenant resources not being created
+# for i in $(seq 1 10); do
+#   if kubectl -n ${namespace} wait --for=condition=ready --timeout=600s pod -l v1.min.io/tenant=yatai-minio; then
+#     echo "✅ minio tenant is ready"
+#     break
+#   else
+#     if [ $i -eq 10 ]; then
+#       echo "😱 minio tenant is not ready"
+#       exit 1
+#     fi
+#     echo "😱 minio tenant is not ready, retrying..."
+#     sleep 5
+#     continue
+#   fi
+# done
+
+
 helm repo add minio https://operator.min.io/ || true
 helm repo update minio
 
-echo "🤖 creating MinIO Tenant..."
+echo "🔐 Creating secret for MinIO credentials..."
+kubectl create secret generic yatai-minio-secret \
+  -n ${namespace} \
+  --from-literal=accesskey=${S3_ACCESS_KEY} \
+  --from-literal=secretkey=${S3_SECRET_KEY} || true
+
+echo "🤖 Creating MinIO Tenant..."
 helm upgrade --install yatai-minio-tenant minio/tenant \
   -n ${namespace} \
-  --set secrets.accessKey=${S3_ACCESS_KEY} \
-  --set secrets.secretKey=${S3_SECRET_KEY} \
   --set tenant.name=yatai-minio \
-  --set tenant.certificate.requestAutoCert=false
+  --set tenant.certificate.requestAutoCert=false \
+  --set tenant.configSecret.name=yatai-minio-secret
 
-
-echo "⏳ waiting for minio tenant to be ready..."
-# this retry logic is to avoid kubectl wait errors due to minio tenant resources not being created
+echo "⏳ Waiting for MinIO tenant to be ready..."
+# Retry logic to avoid kubectl wait errors due to minio tenant resources not being created
 for i in $(seq 1 10); do
   if kubectl -n ${namespace} wait --for=condition=ready --timeout=600s pod -l v1.min.io/tenant=yatai-minio; then
-    echo "✅ minio tenant is ready"
+    echo "✅ MinIO tenant is ready"
     break
   else
     if [ $i -eq 10 ]; then
-      echo "😱 minio tenant is not ready"
+      echo "❌ MinIO tenant is not ready after multiple attempts"
       exit 1
     fi
-    echo "😱 minio tenant is not ready, retrying..."
+    echo "🔄 MinIO tenant is not ready, retrying..."
     sleep 5
-    continue
   fi
 done
 
